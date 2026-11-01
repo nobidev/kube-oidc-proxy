@@ -1,0 +1,250 @@
+name: helm
+
+# Lint, package and publish the kube-oidc-proxy Helm chart.
+#
+# Published to:
+#   1. OCI registry (GHCR):  oci://ghcr.io/<owner>/charts/kube-oidc-proxy
+#   2. Classic Helm repo on GitHub Pages (gh-pages branch):
+#        https://<owner>.github.io/<repo>
+#
+# The chart sources in deploy/charts are NOT modified in git (to keep syncing
+# with upstream conflict-free). Version, appVersion and the default image are
+# injected at packaging time.
+#
+# Optional repository variables (Settings -> Secrets and variables -> Variables):
+#   HELM_IMAGE_REPOSITORY  default image repository baked into values.yaml
+#                          (default: docker.io/tremolosecurity/kube-oidc-proxy)
+#   HELM_PAGES_ENABLED     set to "false" to skip publishing to gh-pages
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'deploy/charts/**'
+      - '.github/workflows/helm.yaml'
+      - '.github/workflows/build.yaml'
+  pull_request:
+    paths:
+      - 'deploy/charts/**'
+      - '.github/workflows/helm.yaml'
+  workflow_dispatch:
+    inputs:
+      chart_version:
+        description: 'Chart version to publish (default: app version from build.yaml)'
+        required: false
+        type: string
+      app_version:
+        description: 'App/image version (default: PROJ_VERSION from build.yaml)'
+        required: false
+        type: string
+      force:
+        description: 'Overwrite the chart version if it already exists'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: helm-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CHART_NAME: kube-oidc-proxy
+  CHART_DIR: deploy/charts/kube-oidc-proxy
+  HELM_VERSION: v3.19.0
+  DEFAULT_IMAGE_REPOSITORY: docker.io/tremolosecurity/kube-oidc-proxy
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    outputs:
+      chart_version: ${{ steps.version.outputs.chart_version }}
+      app_version: ${{ steps.version.outputs.app_version }}
+      image_repository: ${{ steps.version.outputs.image_repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Resolve versions
+        id: version
+        env:
+          INPUT_CHART_VERSION: ${{ inputs.chart_version }}
+          INPUT_APP_VERSION: ${{ inputs.app_version }}
+          VAR_IMAGE_REPOSITORY: ${{ vars.HELM_IMAGE_REPOSITORY }}
+        run: |
+          set -euo pipefail
+          # App version: input > PROJ_VERSION in build.yaml > appVersion in Chart.yaml
+          app_version="${INPUT_APP_VERSION}"
+          if [ -z "${app_version}" ]; then
+            app_version="$(grep -oP 'PROJ_VERSION="\K[^"]+' .github/workflows/build.yaml | head -n1 || true)"
+          fi
+          if [ -z "${app_version}" ]; then
+            app_version="$(yq '.appVersion' "${CHART_DIR}/Chart.yaml")"
+          fi
+          chart_version="${INPUT_CHART_VERSION:-${app_version#v}}"
+          image_repository="${VAR_IMAGE_REPOSITORY:-${DEFAULT_IMAGE_REPOSITORY}}"
+
+          if ! echo "${chart_version}" | grep -qP '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Chart version '${chart_version}' is not valid SemVer"
+            exit 1
+          fi
+
+          echo "app_version=${app_version}"           >> "$GITHUB_OUTPUT"
+          echo "chart_version=${chart_version}"       >> "$GITHUB_OUTPUT"
+          echo "image_repository=${image_repository}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Helm chart"
+            echo "| key | value |"
+            echo "|---|---|"
+            echo "| chart version | \`${chart_version}\` |"
+            echo "| app version | \`${app_version}\` |"
+            echo "| image | \`${image_repository}:${app_version}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare chart
+        env:
+          CHART_VERSION: ${{ steps.version.outputs.chart_version }}
+          APP_VERSION: ${{ steps.version.outputs.app_version }}
+          IMAGE_REPOSITORY: ${{ steps.version.outputs.image_repository }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          mkdir -p build
+          cp -r "${CHART_DIR}" "build/${CHART_NAME}"
+          cd "build/${CHART_NAME}"
+          yq -i '
+            .version = strenv(CHART_VERSION) |
+            .appVersion = strenv(APP_VERSION) |
+            .home = strenv(REPO_URL) |
+            .sources = [strenv(REPO_URL)]
+          ' Chart.yaml
+          yq -i '
+            .image.repository = strenv(IMAGE_REPOSITORY) |
+            .image.tag = strenv(APP_VERSION)
+          ' values.yaml
+          cat Chart.yaml
+          yq '.image' values.yaml
+
+      - name: Lint
+        run: |
+          set -euo pipefail
+          helm lint "build/${CHART_NAME}" --strict \
+            --set oidc.clientId=lint --set oidc.issuerUrl=https://issuer.example.com --set oidc.usernameClaim=sub
+
+      - name: Template
+        run: |
+          set -euo pipefail
+          helm template test "build/${CHART_NAME}" \
+            --set oidc.clientId=lint --set oidc.issuerUrl=https://issuer.example.com --set oidc.usernameClaim=sub \
+            > /dev/null
+          helm template test "build/${CHART_NAME}" \
+            --set oidc.clientId=lint --set oidc.issuerUrl=https://issuer.example.com --set oidc.usernameClaim=sub \
+            --set ingress.enabled=true --set podDisruptionBudget.enabled=true --set tls.certManager=true \
+            > /dev/null
+
+      - name: Package
+        run: helm package "build/${CHART_NAME}" --destination dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  publish:
+    needs: lint
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # push to gh-pages
+      packages: write   # push to GHCR
+    env:
+      CHART_VERSION: ${{ needs.lint.outputs.chart_version }}
+      FORCE: ${{ inputs.force && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: helm-chart
+          path: dist
+
+      - name: Downcase owner/repo
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+          echo "REPO_NAME=${GITHUB_REPOSITORY#*/}"  >> "$GITHUB_ENV"
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username "${{ github.actor }}" --password-stdin
+
+      - name: Push to GHCR (OCI)
+        run: |
+          set -euo pipefail
+          ref="oci://ghcr.io/${OWNER}/charts/${CHART_NAME}"
+          if helm show chart "${ref}" --version "${CHART_VERSION}" >/dev/null 2>&1 && [ "${FORCE}" != "true" ]; then
+            echo "::notice::${ref}:${CHART_VERSION} already exists, skipping (use workflow_dispatch with force=true to overwrite)"
+          else
+            helm push "dist/${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+          fi
+          {
+            echo "### OCI"
+            echo '```bash'
+            echo "helm install kube-oidc-proxy ${ref} --version ${CHART_VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish to gh-pages
+        if: vars.HELM_PAGES_ENABLED != 'false'
+        run: |
+          set -euo pipefail
+          pages_url="https://${OWNER}.github.io/${REPO_NAME}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin gh-pages >/dev/null 2>&1; then
+            git fetch --depth=1 origin gh-pages
+            git worktree add pages origin/gh-pages
+            git -C pages checkout -B gh-pages
+          else
+            git worktree add --detach pages
+            git -C pages checkout --orphan gh-pages
+            git -C pages rm -rf --quiet .
+            touch pages/.nojekyll
+          fi
+
+          pkg="${CHART_NAME}-${CHART_VERSION}.tgz"
+          if [ -f "pages/${pkg}" ] && [ "${FORCE}" != "true" ]; then
+            echo "::notice::${pkg} already exists on gh-pages, skipping"
+          else
+            cp "dist/${pkg}" pages/
+            if [ -f pages/index.yaml ]; then
+              # drop a stale entry for this version (force overwrite) so the new digest is indexed
+              yq -i 'del(.entries[strenv(CHART_NAME)][] | select(.version == strenv(CHART_VERSION)))' pages/index.yaml
+              helm repo index pages --url "${pages_url}" --merge pages/index.yaml
+            else
+              helm repo index pages --url "${pages_url}"
+            fi
+            git -C pages add -A
+            git -C pages commit -m "Publish ${CHART_NAME} ${CHART_VERSION}"
+            for i in 1 2 3 4; do
+              git -C pages push origin gh-pages && break
+              sleep $((2 ** i))
+            done
+          fi
+          {
+            echo "### Helm repo (GitHub Pages)"
+            echo '```bash'
+            echo "helm repo add ${OWNER} ${pages_url}"
+            echo "helm install kube-oidc-proxy ${OWNER}/${CHART_NAME} --version ${CHART_VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
