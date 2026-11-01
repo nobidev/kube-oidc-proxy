@@ -3,7 +3,7 @@ module github.com/jetstack/kube-oidc-proxy
 go 1.27.1
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/golang/mock v1.6.0
 	github.com/heptiolabs/healthcheck v0.0.0-20211123025425-613501dd5deb
 	github.com/onsi/ginkgo v1.16.5
