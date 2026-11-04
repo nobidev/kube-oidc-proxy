@@ -7,6 +7,9 @@ name: helm
 #   2. Classic Helm repo on GitHub Pages (gh-pages branch):
 #        https://<owner>.github.io/<repo>
 #
+# Publishing always overwrites an existing chart version (same as upstream image
+# tags): the chart is rebuilt and re-pushed for the current version on every run.
+#
 # The chart sources in deploy/charts are NOT modified in git (to keep syncing
 # with upstream conflict-free). Version, appVersion and the default image are
 # injected at packaging time.
@@ -38,11 +41,6 @@ on:
         description: 'App/image version (default: PROJ_VERSION from build.yaml)'
         required: false
         type: string
-      force:
-        description: 'Overwrite the chart version if it already exists'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -166,7 +164,6 @@ jobs:
       packages: write   # push to GHCR
     env:
       CHART_VERSION: ${{ needs.lint.outputs.chart_version }}
-      FORCE: ${{ inputs.force && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -191,11 +188,10 @@ jobs:
         run: |
           set -euo pipefail
           ref="oci://ghcr.io/${OWNER}/charts/${CHART_NAME}"
-          if helm show chart "${ref}" --version "${CHART_VERSION}" >/dev/null 2>&1 && [ "${FORCE}" != "true" ]; then
-            echo "::notice::${ref}:${CHART_VERSION} already exists, skipping (use workflow_dispatch with force=true to overwrite)"
-          else
-            helm push "dist/${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+          if helm show chart "${ref}" --version "${CHART_VERSION}" >/dev/null 2>&1; then
+            echo "::notice::${ref}:${CHART_VERSION} already exists, overwriting"
           fi
+          helm push "dist/${CHART_NAME}-${CHART_VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
           {
             echo "### OCI"
             echo '```bash'
@@ -223,18 +219,21 @@ jobs:
           fi
 
           pkg="${CHART_NAME}-${CHART_VERSION}.tgz"
-          if [ -f "pages/${pkg}" ] && [ "${FORCE}" != "true" ]; then
-            echo "::notice::${pkg} already exists on gh-pages, skipping"
+          if [ -f "pages/${pkg}" ]; then
+            echo "::notice::${pkg} already exists on gh-pages, overwriting"
+          fi
+          cp "dist/${pkg}" pages/
+          if [ -f pages/index.yaml ]; then
+            # drop the old entry for this version so the new digest is indexed
+            yq -i 'del(.entries[strenv(CHART_NAME)][] | select(.version == strenv(CHART_VERSION)))' pages/index.yaml
+            helm repo index pages --url "${pages_url}" --merge pages/index.yaml
           else
-            cp "dist/${pkg}" pages/
-            if [ -f pages/index.yaml ]; then
-              # drop a stale entry for this version (force overwrite) so the new digest is indexed
-              yq -i 'del(.entries[strenv(CHART_NAME)][] | select(.version == strenv(CHART_VERSION)))' pages/index.yaml
-              helm repo index pages --url "${pages_url}" --merge pages/index.yaml
-            else
-              helm repo index pages --url "${pages_url}"
-            fi
-            git -C pages add -A
+            helm repo index pages --url "${pages_url}"
+          fi
+          git -C pages add -A
+          if git -C pages diff --cached --quiet; then
+            echo "::notice::gh-pages unchanged"
+          else
             git -C pages commit -m "Publish ${CHART_NAME} ${CHART_VERSION}"
             for i in 1 2 3 4; do
               git -C pages push origin gh-pages && break
