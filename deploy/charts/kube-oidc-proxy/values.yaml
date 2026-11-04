@@ -48,6 +48,12 @@ oidc:
   # OIDC issuer URL. If not provided, default hosts root CA's will be used.
   caPEM:
 
+  # Path (inside the container) of a CA bundle used to verify the TLS connection
+  # to the OIDC issuer URL. Only used when `caPEM` is not set. Mount a custom
+  # bundle via `extraVolumes`/`extraVolumeMounts` and point this to it, or set
+  # to "" to not pass `--oidc-ca-file` at all.
+  caFile: /etc/ssl/certs/ca-certificates.crt
+
   usernamePrefix:
   groupsClaim:
   groupsPrefix:

@@ -45,6 +45,24 @@ oidc:
     -----END CERTIFICATE-----
 ```
 
+If `caPEM` is not set, `oidc.caFile` (default
+`/etc/ssl/certs/ca-certificates.crt`) is passed as `--oidc-ca-file`. Point it to
+a bundle mounted with `extraVolumes`/`extraVolumeMounts`, or set it to `""` to
+use the host's root CA set:
+
+```yaml
+oidc:
+  caFile: /etc/custom-ca/ca.crt
+extraVolumes:
+  - name: custom-ca
+    configMap:
+      name: custom-ca
+extraVolumeMounts:
+  - name: custom-ca
+    mountPath: /etc/custom-ca
+    readOnly: true
+```
+
 This minimal configuration gives a cluster internal IP address that can be used
 with `kubectl` to authenticate requests to Kubernetes API server.
 

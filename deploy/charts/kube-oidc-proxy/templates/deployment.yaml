@@ -46,6 +46,8 @@ spec:
           - "--oidc-username-claim=$(OIDC_USERNAME_CLAIM)"
           {{- if .Values.oidc.caPEM }}
           - "--oidc-ca-file=/etc/oidc/oidc-ca.pem"
+          {{- else if .Values.oidc.caFile }}
+          - "--oidc-ca-file={{ .Values.oidc.caFile }}"
           {{ end }}
           {{- if .Values.oidc.usernamePrefix }}
           - "--oidc-username-prefix=$(OIDC_USERNAME_PREFIX)"

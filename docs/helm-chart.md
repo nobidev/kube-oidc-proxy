@@ -31,10 +31,18 @@ helm install kube-oidc-proxy nobidev/kube-oidc-proxy --version 1.0.13
 The chart sources are not modified in git; these values are injected at
 package time so syncing with upstream stays conflict-free.
 
-An already-published version is never overwritten unless the workflow is run
-manually with `force: true`. To publish chart-only changes without an app
-version bump, run the workflow manually with a new `chart_version`
-(e.g. `1.0.14`, keep `app_version` empty).
+Every run **rebuilds and overwrites** the chart for the current version (same
+as upstream re-pushing image tags), so chart-only changes are published under
+the same version on the next push to `master`. Clients must refresh to pick
+them up, e.g.:
+
+```bash
+helm repo update                       # classic repo: refresh index (new digest)
+helm pull oci://ghcr.io/nobidev/charts/kube-oidc-proxy --version 1.0.13   # OCI: always fetches
+```
+
+GitOps tools that cache by version (Argo CD, Flux) will not redeploy on an
+overwrite by themselves; trigger a hard refresh / reconcile.
 
 ## One-time setup
 
