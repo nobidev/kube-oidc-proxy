@@ -89,3 +89,18 @@ service. The secret must be of `kubernetes.io/tls` type.
 tls:
   secretName: my-tls-secret-with-key-and-cert
 ```
+
+## Identity filter
+
+Restrict which users/groups may use the proxy with `identityFilter` (regular
+expressions are anchored, matched after prefixing; violations return 403).
+See [docs/tasks/identity-filter.md](../../../docs/tasks/identity-filter.md).
+
+```yaml
+identityFilter:
+  allowedUsernameRegex: ['oidc:.+@example\.com']
+  deniedUsernameRegex: ['system:.*']
+  allowedGroupRegex: []
+  deniedGroupRegex: ['system:masters']
+  requiredGroups: ['oidc:k8s-users']   # user must be in ALL of these
+```

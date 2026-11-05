@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/audit"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/context"
+	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/identityfilter"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/logging"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/subjectaccessreview"
 )
@@ -54,6 +56,13 @@ func (p *Proxy) withAuthenticateRequest(handler http.Handler) http.Handler {
 		req, remoteAddr = context.RemoteAddr(req)
 
 		klog.V(4).Infof("authenticated request: %s", remoteAddr)
+
+		// Enforce the identity filter (username/group allow/deny lists and
+		// required groups) on the OIDC identity.
+		if err := p.config.IdentityFilter.CheckAuthenticated(info.User); err != nil {
+			p.handleError(rw, req, err)
+			return
+		}
 
 		// Add the user info to the request context
 		req = req.WithContext(genericapirequest.WithUser(req.Context(), info.User))
@@ -129,6 +138,13 @@ func (p *Proxy) withImpersonateRequest(handler http.Handler) http.Handler {
 			}
 
 			if target != nil {
+				// Enforce the identity filter on the impersonation target so
+				// it cannot be bypassed with --as / --as-group.
+				if err := p.config.IdentityFilter.CheckImpersonationTarget(target); err != nil {
+					p.handleError(rw, req, err)
+					return
+				}
+
 				// TODO - store original context for logging
 				user = target
 				targetForContext = target
@@ -236,6 +252,14 @@ func (p *Proxy) newErrorHandler() func(rw http.ResponseWriter, r *http.Request, 
 
 		// regardless of reason, log failed auth
 		logging.LogFailedRequest(r)
+
+		// Rejected by the identity filter. Details are logged only, never
+		// returned to the client.
+		if errors.Is(err, identityfilter.ErrDenied) {
+			klog.V(2).Infof("request rejected (%s): %s", r.RemoteAddr, err)
+			http.Error(rw, "Forbidden: identity is not permitted to use this proxy", http.StatusForbidden)
+			return
+		}
 
 		switch err {
 
