@@ -1,36 +1,30 @@
-name: helm
+name: release
 
-# Lint, package and publish the kube-oidc-proxy Helm chart.
+# Test, build and publish the kube-oidc-proxy image and Helm chart.
 #
-# Published to:
+# Image (multi-arch amd64/arm64):  ghcr.io/<owner>/kube-oidc-proxy
+#   tags: <appVersion>, <appVersion>-<sha7> (immutable), latest
+# Chart:
 #   1. OCI registry (GHCR):  oci://ghcr.io/<owner>/charts/kube-oidc-proxy
 #   2. Classic Helm repo on GitHub Pages (gh-pages branch):
 #        https://<owner>.github.io/<repo>
 #
-# Publishing always overwrites an existing chart version (same as upstream image
-# tags): the chart is rebuilt and re-pushed for the current version on every run.
+# The packaged chart pins image.tag to <appVersion>-<sha7> of the commit it was
+# built from, so a chart rebuild always points at the matching image.
 #
-# The chart sources in deploy/charts are NOT modified in git (to keep syncing
-# with upstream conflict-free). Version, appVersion and the default image are
-# injected at packaging time.
+# Publishing always overwrites the current chart version and the <appVersion>
+# / latest image tags (same as upstream). PRs only test/build, nothing is pushed.
 #
 # Optional repository variables (Settings -> Secrets and variables -> Variables):
-#   HELM_IMAGE_REPOSITORY  default image repository baked into values.yaml
-#                          (default: docker.io/tremolosecurity/kube-oidc-proxy)
+#   HELM_IMAGE_REPOSITORY  image repository baked into the chart
+#                          (default: ghcr.io/<owner>/kube-oidc-proxy)
 #   HELM_PAGES_ENABLED     set to "false" to skip publishing to gh-pages
 
 on:
   push:
     branches:
       - master
-    paths:
-      - 'deploy/charts/**'
-      - '.github/workflows/helm.yaml'
-      - '.github/workflows/build.yaml'
   pull_request:
-    paths:
-      - 'deploy/charts/**'
-      - '.github/workflows/helm.yaml'
   workflow_dispatch:
     inputs:
       chart_version:
@@ -46,22 +40,38 @@ permissions:
   contents: read
 
 concurrency:
-  group: helm-${{ github.ref }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 env:
   CHART_NAME: kube-oidc-proxy
   CHART_DIR: deploy/charts/kube-oidc-proxy
   HELM_VERSION: v3.19.0
-  DEFAULT_IMAGE_REPOSITORY: docker.io/tremolosecurity/kube-oidc-proxy
+  PUSH: ${{ github.event_name != 'pull_request' && github.ref == 'refs/heads/master' }}
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Generate mocks
+        run: go generate ./pkg/mocks/...
+
+      - name: Test
+        run: go test -count=1 ./pkg/... ./cmd/...
+
   lint:
     runs-on: ubuntu-latest
     outputs:
       chart_version: ${{ steps.version.outputs.chart_version }}
       app_version: ${{ steps.version.outputs.app_version }}
       image_repository: ${{ steps.version.outputs.image_repository }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
     steps:
       - uses: actions/checkout@v4
 
@@ -86,7 +96,8 @@ jobs:
             app_version="$(yq '.appVersion' "${CHART_DIR}/Chart.yaml")"
           fi
           chart_version="${INPUT_CHART_VERSION:-${app_version#v}}"
-          image_repository="${VAR_IMAGE_REPOSITORY:-${DEFAULT_IMAGE_REPOSITORY}}"
+          image_repository="${VAR_IMAGE_REPOSITORY:-ghcr.io/${GITHUB_REPOSITORY,,}}"
+          image_tag="${app_version}-${GITHUB_SHA::7}"
 
           if ! echo "${chart_version}" | grep -qP '^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$'; then
             echo "::error::Chart version '${chart_version}' is not valid SemVer"
@@ -96,13 +107,14 @@ jobs:
           echo "app_version=${app_version}"           >> "$GITHUB_OUTPUT"
           echo "chart_version=${chart_version}"       >> "$GITHUB_OUTPUT"
           echo "image_repository=${image_repository}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}"               >> "$GITHUB_OUTPUT"
           {
             echo "### Helm chart"
             echo "| key | value |"
             echo "|---|---|"
             echo "| chart version | \`${chart_version}\` |"
             echo "| app version | \`${app_version}\` |"
-            echo "| image | \`${image_repository}:${app_version}\` |"
+            echo "| image | \`${image_repository}:${image_tag}\` |"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Prepare chart
@@ -110,6 +122,7 @@ jobs:
           CHART_VERSION: ${{ steps.version.outputs.chart_version }}
           APP_VERSION: ${{ steps.version.outputs.app_version }}
           IMAGE_REPOSITORY: ${{ steps.version.outputs.image_repository }}
+          IMAGE_TAG: ${{ steps.version.outputs.image_tag }}
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
@@ -124,7 +137,7 @@ jobs:
           ' Chart.yaml
           yq -i '
             .image.repository = strenv(IMAGE_REPOSITORY) |
-            .image.tag = strenv(APP_VERSION)
+            .image.tag = strenv(IMAGE_TAG)
           ' values.yaml
           cat Chart.yaml
           yq '.image' values.yaml
@@ -155,8 +168,75 @@ jobs:
           path: dist/*.tgz
           if-no-files-found: error
 
+  image:
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      APP_VERSION: ${{ needs.lint.outputs.app_version }}
+      IMAGE_TAG: ${{ needs.lint.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git describe for version ldflags
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build binaries
+        run: |
+          set -euo pipefail
+          ldflags="-w $(hack/version-ldflags.sh)"
+          for arch in amd64 arm64; do
+            mkdir -p "bin/${arch}"
+            CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" go build -ldflags "${ldflags}" \
+              -o "bin/${arch}/kube-oidc-proxy" ./cmd/.
+          done
+          file bin/*/kube-oidc-proxy
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image name
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ env.PUSH == 'true' }}
+          # PRs: amd64 only, just to verify the build
+          platforms: ${{ env.PUSH == 'true' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
+          tags: |
+            ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE }}:${{ env.APP_VERSION }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Summary
+        run: |
+          {
+            echo "### Image"
+            echo "\`${IMAGE}:${IMAGE_TAG}\` (pushed: ${PUSH})"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   publish:
-    needs: lint
+    needs: [lint, image]
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:

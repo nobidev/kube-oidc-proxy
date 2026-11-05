@@ -5,8 +5,10 @@
 replicaCount: 1
 
 image:
-  repository: quay.io/jetstack/kube-oidc-proxy
-  tag: v0.3.0
+  repository: ghcr.io/nobidev/kube-oidc-proxy
+  # Defaults to the chart appVersion. Published charts pin the immutable
+  # <appVersion>-<sha7> tag of the commit they were built from.
+  tag: ""
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -68,16 +70,21 @@ oidc:
 # Username/group lists also apply to impersonation targets (Impersonate-User /
 # Impersonate-Group). Avoid "$(" in expressions (Kubernetes expands $(VAR) in
 # container args).
+#
+# Default: usernames and groups may only contain ASCII letters, digits and "-".
+# This blocks "system:*" names/groups (e.g. system:admin, system:masters,
+# service accounts) as well as e-mail usernames and prefixes containing ":".
+# Set the lists to [] to disable.
 identityFilter:
   # Username must match at least one expression (if any are set).
-  allowedUsernameRegex: []
-  #  - 'oidc:.+@example\.com'
+  allowedUsernameRegex:
+    - '[A-Za-z0-9-]+'
   # Username must not match any expression. Takes precedence over allow.
   deniedUsernameRegex: []
   #  - 'system:.*'
   # Every group of the user must match at least one expression (if any are set).
-  allowedGroupRegex: []
-  #  - 'oidc:k8s-.*'
+  allowedGroupRegex:
+    - '[A-Za-z0-9-]+'
   # No group of the user may match any expression. Takes precedence over allow.
   deniedGroupRegex: []
   #  - 'system:masters'

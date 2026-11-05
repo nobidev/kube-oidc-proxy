@@ -158,3 +158,46 @@ func TestCheckImpersonationTarget(t *testing.T) {
 		t.Errorf("expected ErrDenied, got %v", err)
 	}
 }
+
+// The Helm chart ships this rule by default: only ASCII letters, digits and
+// "-" in usernames and groups.
+func TestChartDefaultRule(t *testing.T) {
+	f := mustNew(t, Config{
+		AllowedUsernameRegex: []string{`[A-Za-z0-9-]+`},
+		AllowedGroupRegex:    []string{`[A-Za-z0-9-]+`},
+	})
+
+	for name, exp := range map[string]bool{
+		"alice":                               true,
+		"Alice-01":                            true,
+		"k8s-admins":                          true,
+		"-":                                   true,
+		"system:admin":                        false,
+		"system:serviceaccount:kube-system:x": false,
+		"oidc:alice":                          false,
+		"alice@example.com":                   false,
+		"alice.smith":                         false,
+		"alice_smith":                         false,
+		"alice smith":                         false,
+		"/k8s-admins":                         false,
+		"alice\n":                             false,
+		"nguyễn":                              false,
+		"":                                    false,
+	} {
+		if got := f.CheckUsername(name) == nil; got != exp {
+			t.Errorf("username %q: expected permitted=%t", name, exp)
+		}
+		if got := f.CheckGroups([]string{name}) == nil; got != exp {
+			t.Errorf("group %q: expected permitted=%t", name, exp)
+		}
+	}
+
+	// system:masters among otherwise valid groups rejects the request
+	if err := f.CheckGroups([]string{"dev", "system:masters"}); err == nil {
+		t.Error("expected system:masters to be rejected")
+	}
+	// no groups is fine (use --required-group to demand membership)
+	if err := f.CheckGroups(nil); err != nil {
+		t.Errorf("unexpected error: %s", err)
+	}
+}

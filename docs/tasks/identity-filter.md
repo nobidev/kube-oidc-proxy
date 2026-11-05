@@ -56,7 +56,9 @@ kube-oidc-proxy \
   ...
 ```
 
-Helm chart:
+Helm chart (the chart ships `allowedUsernameRegex` / `allowedGroupRegex` set to
+`['[A-Za-z0-9-]+']` by default, i.e. only ASCII letters, digits and `-`; replace
+or set them to `[]` to disable):
 
 ```yaml
 identityFilter:
