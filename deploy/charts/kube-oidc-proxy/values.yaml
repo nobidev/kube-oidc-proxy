@@ -93,6 +93,16 @@ identityFilter:
   requiredGroups: []
   #  - 'oidc:k8s-users'
 
+# Resolve user groups from OpenShift Group objects (user.openshift.io/v1,
+# Group.users) instead of the OIDC token (--auto-groups). The final username
+# (after usernamePrefix) must be listed in Group.users. Groups from the token
+# (oidc.groupsClaim) are ignored. Adds list/watch on groups.user.openshift.io
+# to the ClusterRole. The proxy fails to start if the API is unavailable.
+autoGroups:
+  enabled: false
+  # Max time to wait for the initial group cache sync at startup.
+  syncTimeout: 1m
+
 # To enable token passthrough feature
 # https://github.com/jetstack/kube-oidc-proxy/blob/master/docs/tasks/token-passthrough.md
 tokenPassthrough:

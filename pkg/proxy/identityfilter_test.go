@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -58,6 +60,10 @@ var identityFilterTokens = authenticator.TokenFunc(func(_ context.Context, tok s
 })
 
 func newIdentityFilterServer(t *testing.T, f *identityfilter.Filter, disableImpersonation bool) (*httptest.Server, *recordingRT) {
+	return newTestServerWithConfig(t, &Config{IdentityFilter: f, DisableImpersonation: disableImpersonation})
+}
+
+func newTestServerWithConfig(t *testing.T, config *Config) (*httptest.Server, *recordingRT) {
 	t.Helper()
 	sr, _ := subjectaccessreview.New(allowAllSAR{})
 	rt := &recordingRT{}
@@ -66,7 +72,7 @@ func newIdentityFilterServer(t *testing.T, f *identityfilter.Filter, disableImpe
 		subjectAccessReviewer: sr,
 		clientTransport:       rt,
 		noAuthClientTransport: rt,
-		config:                &Config{IdentityFilter: f, DisableImpersonation: disableImpersonation},
+		config:                config,
 		hooks:                 hooks.New(),
 	}
 	aud, err := audit.New(new(options.AuditOptions), "0.0.0.0:1234", new(server.SecureServingInfo))
@@ -210,5 +216,94 @@ func TestIdentityFilterDisableImpersonation(t *testing.T) {
 	}
 	if len(rt.reqs) != 1 {
 		t.Errorf("expected only the permitted request upstream, got %d", len(rt.reqs))
+	}
+}
+
+type staticGroupResolver map[string][]string
+
+func (s staticGroupResolver) GroupsFor(username string) []string { return s[username] }
+
+func TestAutoGroups(t *testing.T) {
+	f, err := identityfilter.New(identityfilter.Config{
+		DeniedGroupRegex: []string{`system:.*`},
+		RequiredGroups:   []string{"k8s-users"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := staticGroupResolver{
+		"alice": {"k8s-admins", "k8s-users"},
+		"bob":   {"dev"},
+	}
+
+	tests := map[string]struct {
+		token     string
+		headers   map[string][]string
+		expCode   int
+		expUser   string
+		expGroups []string
+	}{
+		"groups from resolver, token groups discarded": {
+			token: "alice|system:masters,evil", expCode: 200,
+			expUser: "alice", expGroups: []string{"k8s-admins", "k8s-users", "system:authenticated"},
+		},
+		"token claims required group but resolver does not": {
+			token: "bob|k8s-users", expCode: 403,
+		},
+		"user without any OpenShift group": {
+			token: "carol", expCode: 403,
+		},
+		"impersonation target does not get resolver groups": {
+			token:   "alice",
+			headers: map[string][]string{"Impersonate-User": {"bob"}},
+			expCode: 200, expUser: "bob", expGroups: []string{"system:authenticated"},
+		},
+	}
+
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			srv, rt := newTestServerWithConfig(t, &Config{IdentityFilter: f, GroupResolver: resolver})
+
+			req, _ := http.NewRequest(http.MethodGet, srv.URL+"/api", nil)
+			req.Header.Set("Authorization", "Bearer "+tc.token)
+			for k, vs := range tc.headers {
+				for _, v := range vs {
+					req.Header.Add(k, v)
+				}
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+
+			if resp.StatusCode != tc.expCode {
+				t.Fatalf("expected %d, got %d", tc.expCode, resp.StatusCode)
+			}
+			if tc.expCode != 200 {
+				if len(rt.reqs) != 0 {
+					t.Errorf("rejected request reached the API server")
+				}
+				return
+			}
+			if len(rt.reqs) != 1 {
+				t.Fatalf("expected 1 upstream request, got %d", len(rt.reqs))
+			}
+			h := rt.reqs[0]
+			if got := h.Get("Impersonate-User"); got != tc.expUser {
+				t.Errorf("expected user %q, got %q", tc.expUser, got)
+			}
+			got := append([]string(nil), h.Values("Impersonate-Group")...)
+			sort.Strings(got)
+			if !reflect.DeepEqual(got, tc.expGroups) {
+				t.Errorf("expected groups %v, got %v", tc.expGroups, got)
+			}
+			// the original identity recorded for auditing carries the resolved groups
+			if tc.headers != nil {
+				if og := h.Values("Impersonate-Extra-Originaluser.jetstack.io-groups"); !reflect.DeepEqual(og, []string{"k8s-admins", "k8s-users"}) {
+					t.Errorf("expected original groups from resolver, got %v", og)
+				}
+			}
+		})
 	}
 }

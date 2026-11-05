@@ -98,6 +98,10 @@ func (o *Options) Validate(cmd *cobra.Command) error {
 		errs = append(errs, errors.New("cannot add extra user headers when impersonation disabled"))
 	}
 
+	if o.App.AutoGroups && o.App.AutoGroupsSyncTimeout <= 0 {
+		errs = append(errs, errors.New("--auto-groups-sync-timeout must be greater than 0"))
+	}
+
 	if len(errs) > 0 {
 		return k8sErrors.NewAggregate(errs)
 	}

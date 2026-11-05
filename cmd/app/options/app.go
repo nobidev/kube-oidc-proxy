@@ -16,6 +16,9 @@ type KubeOIDCProxyOptions struct {
 
 	FlushInterval time.Duration
 
+	AutoGroups            bool
+	AutoGroupsSyncTimeout time.Duration
+
 	ExtraHeaderOptions ExtraHeaderOptions
 	TokenPassthrough   TokenPassthroughOptions
 }
@@ -48,6 +51,18 @@ func (k *KubeOIDCProxyOptions) AddFlags(fs *pflag.FlagSet) *KubeOIDCProxyOptions
 			"no periodic flushing is done. A negative value means to flush "+
 			"immediately after each write. Streaming requests such as 'kubectl exec' "+
 			"will ignore this option and flush immediately.")
+
+	fs.BoolVar(&k.AutoGroups, "auto-groups", k.AutoGroups, ""+
+		"Resolve the groups of OIDC users from OpenShift Group objects "+
+		"(user.openshift.io/v1, Group.users) instead of the token. The final username "+
+		"(after --oidc-username-prefix) must be listed in Group.users; group names are "+
+		"used as is (--oidc-groups-claim/--oidc-groups-prefix are ignored). Groups are "+
+		"cached with a watch; the proxy fails to start if the API is unavailable. Requires "+
+		"list/watch on groups.user.openshift.io. Not applied to impersonation targets.")
+
+	fs.DurationVar(&k.AutoGroupsSyncTimeout, "auto-groups-sync-timeout", time.Minute,
+		"Maximum time to wait for the initial OpenShift group cache sync at startup "+
+			"when --auto-groups is enabled.")
 
 	k.TokenPassthrough.AddFlags(fs)
 	k.ExtraHeaderOptions.AddFlags(fs)

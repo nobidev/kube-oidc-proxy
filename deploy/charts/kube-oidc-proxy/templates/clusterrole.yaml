@@ -27,3 +27,12 @@ rules:
   verbs:
   - "create"
   - "impersonate"
+{{- if .Values.autoGroups.enabled }}
+- apiGroups:
+  - "user.openshift.io"
+  resources:
+  - "groups"
+  verbs:
+  - "list"
+  - "watch"
+{{- end }}
