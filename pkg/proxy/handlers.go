@@ -57,15 +57,29 @@ func (p *Proxy) withAuthenticateRequest(handler http.Handler) http.Handler {
 
 		klog.V(4).Infof("authenticated request: %s", remoteAddr)
 
+		authUser := info.User
+
+		// With --auto-groups the groups come from the cluster (OpenShift
+		// Group membership of the final username), not from the token.
+		if p.config.GroupResolver != nil {
+			authUser = &authuser.DefaultInfo{
+				Name:   authUser.GetName(),
+				UID:    authUser.GetUID(),
+				Extra:  authUser.GetExtra(),
+				Groups: p.config.GroupResolver.GroupsFor(authUser.GetName()),
+			}
+			klog.V(5).Infof("resolved groups for %q: %v (%s)", authUser.GetName(), authUser.GetGroups(), remoteAddr)
+		}
+
 		// Enforce the identity filter (username/group allow/deny lists and
 		// required groups) on the OIDC identity.
-		if err := p.config.IdentityFilter.CheckAuthenticated(info.User); err != nil {
+		if err := p.config.IdentityFilter.CheckAuthenticated(authUser); err != nil {
 			p.handleError(rw, req, err)
 			return
 		}
 
 		// Add the user info to the request context
-		req = req.WithContext(genericapirequest.WithUser(req.Context(), info.User))
+		req = req.WithContext(genericapirequest.WithUser(req.Context(), authUser))
 		handler.ServeHTTP(rw, req)
 	})
 }

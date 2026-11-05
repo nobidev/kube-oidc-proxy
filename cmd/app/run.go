@@ -6,12 +6,15 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/apiserver/pkg/server"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 
 	"github.com/jetstack/kube-oidc-proxy/cmd/app/options"
 	"github.com/jetstack/kube-oidc-proxy/pkg/probe"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy"
+	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/autogroups"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/identityfilter"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/subjectaccessreview"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/tokenreview"
@@ -111,6 +114,26 @@ func buildRunCommand(stopCh <-chan struct{}, opts *options.Options) *cobra.Comma
 
 			if err != nil {
 				return err
+			}
+
+			// Resolve groups from OpenShift instead of the token
+			if opts.App.AutoGroups {
+				if opts.OIDCAuthentication.GroupsClaim != "" {
+					klog.Warningf("--auto-groups is enabled: ignoring groups from --oidc-groups-claim=%q",
+						opts.OIDCAuthentication.GroupsClaim)
+				}
+				if err := autogroups.CheckAPIAvailable(kubeclient.Discovery()); err != nil {
+					return err
+				}
+				dynamicClient, err := dynamic.NewForConfig(restConfig)
+				if err != nil {
+					return err
+				}
+				resolver := autogroups.New(dynamicClient, 0)
+				if err := resolver.Start(stopCh, opts.App.AutoGroupsSyncTimeout); err != nil {
+					return err
+				}
+				proxyConfig.GroupResolver = resolver
 			}
 
 			// Initialise proxy with OIDC token authenticator

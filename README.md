@@ -125,6 +125,7 @@ users:
  - [Extra Impersonations Headers](./docs/tasks/extra-impersonation-headers.md)
  - [Auditing](./docs/tasks/auditing.md)
  - [Identity Filter](./docs/tasks/identity-filter.md)
+ - [Auto Groups (OpenShift)](./docs/tasks/auto-groups.md)
 
 ## Logging
 

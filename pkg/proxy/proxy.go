@@ -54,6 +54,16 @@ type Config struct {
 	// IdentityFilter restricts which users/groups may use the proxy. nil
 	// permits everyone.
 	IdentityFilter *identityfilter.Filter
+
+	// GroupResolver, when set, replaces the groups of the OIDC user with the
+	// groups returned for its username (e.g. OpenShift Group membership).
+	// Groups from the token are discarded.
+	GroupResolver GroupResolver
+}
+
+// GroupResolver returns the groups of a user.
+type GroupResolver interface {
+	GroupsFor(username string) []string
 }
 
 type errorHandlerFn func(http.ResponseWriter, *http.Request, error)

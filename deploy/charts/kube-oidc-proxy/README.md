@@ -113,3 +113,17 @@ identityFilter:
   deniedGroupRegex: ['system:masters']
   requiredGroups: ['oidc:k8s-users']   # user must be in ALL of these
 ```
+
+## Auto groups (OpenShift)
+
+Resolve user groups from OpenShift `Group` objects instead of the OIDC token.
+The final username (after `usernamePrefix`) must be listed in `Group.users`.
+This adds list/watch on `groups.user.openshift.io` to the ClusterRole. See
+[docs/tasks/auto-groups.md](../../../docs/tasks/auto-groups.md).
+
+```yaml
+autoGroups:
+  enabled: true
+  syncTimeout: 1m
+```
+

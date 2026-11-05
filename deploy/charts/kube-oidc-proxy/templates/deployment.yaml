@@ -70,6 +70,10 @@ spec:
           - "--token-passthrough-audiences={{ join "," .Values.tokenPassthrough.audiences }}"
           {{ end }}
           {{ end }}
+          {{- if .Values.autoGroups.enabled }}
+          - "--auto-groups"
+          - {{ printf "--auto-groups-sync-timeout=%s" (.Values.autoGroups.syncTimeout | toString) | toJson }}
+          {{- end }}
           {{- with .Values.identityFilter }}
           {{- range .allowedUsernameRegex }}
           - {{ printf "--allowed-username-regex=%s" . | toJson }}
