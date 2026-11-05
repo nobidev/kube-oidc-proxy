@@ -13,8 +13,12 @@ Minimal required configuration is `oidc` section of `value.yaml` file.
 oidc:
   clientId: my-client
   issuerUrl: https://accounts.google.com
-  usernameClaim: email
+  usernameClaim: preferred_username
 ```
+
+> The default [identity filter](#identity-filter) only accepts usernames and
+> groups made of ASCII letters, digits and `-`. When using `usernameClaim: email`
+> (or a prefix containing `:`), adjust `identityFilter.allowedUsernameRegex`.
 
 When a custom root CA certificate is required it should be added as PEM encoded
 text value:
@@ -88,4 +92,24 @@ service. The secret must be of `kubernetes.io/tls` type.
 ```yaml
 tls:
   secretName: my-tls-secret-with-key-and-cert
+```
+
+## Identity filter
+
+Restrict which users/groups may use the proxy with `identityFilter` (regular
+expressions are anchored, matched after prefixing; violations return 403).
+
+**Default**: usernames and groups may only contain ASCII letters, digits and
+`-` (`[A-Za-z0-9-]+`). This rejects `system:*` users/groups, service accounts,
+e-mail usernames (`usernameClaim: email`) and prefixes containing `:`. Adjust
+or set the lists to `[]` when that does not fit your IdP.
+See [docs/tasks/identity-filter.md](../../../docs/tasks/identity-filter.md).
+
+```yaml
+identityFilter:
+  allowedUsernameRegex: ['oidc:.+@example\.com']
+  deniedUsernameRegex: ['system:.*']
+  allowedGroupRegex: []
+  deniedGroupRegex: ['system:masters']
+  requiredGroups: ['oidc:k8s-users']   # user must be in ALL of these
 ```

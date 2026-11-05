@@ -12,6 +12,7 @@ import (
 	"github.com/jetstack/kube-oidc-proxy/cmd/app/options"
 	"github.com/jetstack/kube-oidc-proxy/pkg/probe"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy"
+	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/identityfilter"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/subjectaccessreview"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/tokenreview"
 	"github.com/jetstack/kube-oidc-proxy/pkg/util"
@@ -82,6 +83,11 @@ func buildRunCommand(stopCh <-chan struct{}, opts *options.Options) *cobra.Comma
 				return err
 			}
 
+			identityFilter, err := identityfilter.New(opts.IdentityFilter.Config())
+			if err != nil {
+				return err
+			}
+
 			proxyConfig := &proxy.Config{
 				TokenReview:          opts.App.TokenPassthrough.Enabled,
 				DisableImpersonation: opts.App.DisableImpersonation,
@@ -91,6 +97,8 @@ func buildRunCommand(stopCh <-chan struct{}, opts *options.Options) *cobra.Comma
 
 				ExtraUserHeaders:                opts.App.ExtraHeaderOptions.ExtraUserHeaders,
 				ExtraUserHeadersClientIPEnabled: opts.App.ExtraHeaderOptions.EnableClientIPExtraUserHeader,
+
+				IdentityFilter: identityFilter,
 			}
 
 			// Setup Subject Access Review

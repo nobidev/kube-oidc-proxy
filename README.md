@@ -124,6 +124,7 @@ users:
  - [No Impersonation](./docs/tasks/no-impersonation.md)
  - [Extra Impersonations Headers](./docs/tasks/extra-impersonation-headers.md)
  - [Auditing](./docs/tasks/auditing.md)
+ - [Identity Filter](./docs/tasks/identity-filter.md)
 
 ## Logging
 

@@ -10,6 +10,8 @@ permissions:
   
 jobs:
   docker:
+    # nobidev fork: images are built by release.yaml (this job needs upstream secrets)
+    if: github.repository_owner != 'nobidev'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2

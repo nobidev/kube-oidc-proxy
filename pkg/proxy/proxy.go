@@ -24,6 +24,7 @@ import (
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/audit"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/context"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/hooks"
+	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/identityfilter"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/logging"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/subjectaccessreview"
 	"github.com/jetstack/kube-oidc-proxy/pkg/proxy/tokenreview"
@@ -49,6 +50,10 @@ type Config struct {
 
 	ExtraUserHeaders                map[string][]string
 	ExtraUserHeadersClientIPEnabled bool
+
+	// IdentityFilter restricts which users/groups may use the proxy. nil
+	// permits everyone.
+	IdentityFilter *identityfilter.Filter
 }
 
 type errorHandlerFn func(http.ResponseWriter, *http.Request, error)

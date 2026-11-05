@@ -19,6 +19,7 @@ const (
 type Options struct {
 	App                *KubeOIDCProxyOptions
 	OIDCAuthentication *OIDCAuthenticationOptions
+	IdentityFilter     *IdentityFilterOptions
 	SecureServing      *SecureServingOptions
 	Audit              *AuditOptions
 	Client             *ClientOptions
@@ -34,6 +35,7 @@ func New() *Options {
 	return &Options{
 		App:                NewKubeOIDCProxyOptions(nfs),
 		OIDCAuthentication: NewOIDCAuthenticationOptions(nfs),
+		IdentityFilter:     NewIdentityFilterOptions(nfs),
 		SecureServing:      NewSecureServingOptions(nfs),
 		Audit:              NewAuditOptions(nfs),
 		Client:             NewClientOptions(nfs),
@@ -72,6 +74,10 @@ func (o *Options) Validate(cmd *cobra.Command) error {
 	var errs []error
 
 	if err := o.OIDCAuthentication.Validate(); err != nil {
+		errs = append(errs, err)
+	}
+
+	if err := o.IdentityFilter.Validate(); err != nil {
 		errs = append(errs, err)
 	}
 

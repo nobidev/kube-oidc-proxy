@@ -25,7 +25,7 @@ spec:
       serviceAccountName: {{ include "kube-oidc-proxy.fullname" . }}
       containers:
       - name: {{ .Chart.Name }}
-        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         ports:
         - containerPort: 8443
@@ -70,6 +70,23 @@ spec:
           - "--token-passthrough-audiences={{ join "," .Values.tokenPassthrough.audiences }}"
           {{ end }}
           {{ end }}
+          {{- with .Values.identityFilter }}
+          {{- range .allowedUsernameRegex }}
+          - {{ printf "--allowed-username-regex=%s" . | toJson }}
+          {{- end }}
+          {{- range .deniedUsernameRegex }}
+          - {{ printf "--denied-username-regex=%s" . | toJson }}
+          {{- end }}
+          {{- range .allowedGroupRegex }}
+          - {{ printf "--allowed-group-regex=%s" . | toJson }}
+          {{- end }}
+          {{- range .deniedGroupRegex }}
+          - {{ printf "--denied-group-regex=%s" . | toJson }}
+          {{- end }}
+          {{- range .requiredGroups }}
+          - {{ printf "--required-group=%s" . | toJson }}
+          {{- end }}
+          {{- end }}
           {{- if .Values.extraImpersonationHeaders.clientIP }}
           - "--extra-user-header-client-ip"
           {{ end }}
