@@ -3,9 +3,9 @@ entries:
   kube-oidc-proxy:
   - apiVersion: v1
     appVersion: 1.0.13
-    created: "2026-11-04T17:00:18.697205695Z"
+    created: "2026-11-05T09:10:22.570341597Z"
     description: A Helm chart for kube-oidc-proxy
-    digest: 9a2a1c80f3156d27630ab2b1fa28016ec2c6fe602bbe7b1cd64b7904e6828881
+    digest: 862bf11863850d93aa5dd628411f6aed884d60c98838ba2f9c08236f155604e1
     home: https://github.com/nobidev/kube-oidc-proxy
     maintainers:
     - name: mhrabovcin
@@ -16,4 +16,4 @@ entries:
     urls:
     - https://nobidev.github.io/kube-oidc-proxy/kube-oidc-proxy-1.0.13.tgz
     version: 1.0.13
-generated: "2026-11-04T17:00:18.696522383Z"
+generated: "2026-11-05T09:10:22.569755652Z"
